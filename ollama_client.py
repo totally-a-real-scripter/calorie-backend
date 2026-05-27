@@ -3,7 +3,7 @@ import base64
 from typing import Optional
 
 # CHANGE THIS to your server IP (NOT docker bridge unless you KNOW it works)
-OLLAMA_URL = "http://172.17.0.1:11434/api/generate"
+OLLAMA_URL = "http://192.168.68.67:11434/api/generate"
 MODEL_NAME = "llava:7b"
 
 

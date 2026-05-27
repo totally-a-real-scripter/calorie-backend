@@ -30,16 +30,48 @@ async def analyze_meal(
     # Build prompt
     # ----------------------------
     prompt = """
-You are a nutrition analysis AI.
+You are a nutrition analysis engine.
 
-Return ONLY valid JSON in this format:
+Your task is to analyze the provided input (text description and/or image description) and return structured nutrition data.
+
+STRICT RULES:
+- Return ONLY valid JSON
+- Do NOT include markdown (no ``` or formatting)
+- Do NOT include explanations or extra text
+- Do NOT wrap output in code blocks
+- Output must be parsable by json.loads()
+- If unsure, make a reasonable estimate rather than failing
+
+INPUT:
+You will receive either:
+- A description of food eaten (text)
+- Or a description of an image of food
+- Or both
+
+TASK:
+Identify all foods and estimate calories.
+
+OUTPUT FORMAT (MUST FOLLOW EXACTLY):
+
 {
-  "foods": [{"name": "", "calories": 0}],
-  "total_calories": 0,
-  "summary": ""
+  "foods": [
+    {
+      "name": "food name",
+      "calories": number
+    }
+  ],
+  "total_calories": number,
+  "summary": "short 1 sentence summary of the meal"
 }
 
-Be accurate and conservative with calorie estimates.
+RULES FOR VALUES:
+- "foods.name" must be simple (e.g., "apple", "chicken sandwich")
+- "calories" must be a numeric estimate
+- "total_calories" must equal sum of all foods
+- "summary" must be 1 sentence max
+
+NOW ANALYZE THIS INPUT:
+{{INPUT}}
 """
 
     if user_text:

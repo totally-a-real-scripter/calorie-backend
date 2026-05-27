@@ -2,8 +2,8 @@
 <<<<<<< HEAD
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import List, Optional
-from .database import create_tables, get_all_meals, insert_meal
-from .ollama_client import analyze_meal
+from database import create_tables, get_all_meals, insert_meal
+from ollama_client import analyze_meal
 =======
 from fastapi import FastAPI, UploadFile, File
 from typing import List

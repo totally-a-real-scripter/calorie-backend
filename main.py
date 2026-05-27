@@ -1,7 +1,7 @@
 
 from fastapi import FastAPI, UploadFile, File
 from typing import List
-from .database import create_tables, get_all_meals, insert_meal
+from database import create_tables, get_all_meals, insert_meal
 
 app = FastAPI()
 

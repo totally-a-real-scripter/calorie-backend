@@ -4,7 +4,7 @@ import os
 import json
 from typing import Optional, Dict, Any, List
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://192.168.68.67:11434")
 MODEL_NAME = "llava:7b"
 TIMEOUT_SECONDS = 120
 

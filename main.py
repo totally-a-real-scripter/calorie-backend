@@ -1,65 +1,51 @@
 
+<<<<<<< HEAD
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from typing import List, Optional
+from .database import create_tables, get_all_meals, insert_meal
+from .ollama_client import analyze_meal
+=======
 from fastapi import FastAPI, UploadFile, File
 from typing import List
 from database import create_tables, get_all_meals, insert_meal
+<<<<<<< Updated upstream
+=======
+>>>>>>> a48d2858ef8b056ef93a0f95de12df203b058d05
+>>>>>>> Stashed changes
 
 app = FastAPI()
-
-# Mock data for calorie estimation (replace with a more comprehensive database)
-CALORIE_DATA = {
-    "apple": 95,
-    "banana": 105,
-    "orange": 62,
-    "chicken breast": 165,
-    "rice": 130,
-    "broccoli": 55,
-    "pasta": 131,
-    "beef": 250,
-    "potato": 77,
-    "egg": 155,
-}
 
 @app.on_event("startup")
 async def startup_event():
     create_tables()
 
-async def detect_food_with_ollama(image_data: bytes) -> List[str]:
-    """Mocks sending image to Ollama vision model and returning detected food items."""
-    # In a real scenario, this would involve sending the image_data to an Ollama endpoint
-    # and parsing its response. For now, we'll return a dummy list.
-    print("Mocking Ollama vision model for food detection...")
-    # Based on some very basic image analysis (e.g., size), or just a fixed response for now
-    if len(image_data) % 2 == 0:
-        return ["apple", "rice"]
-    else:
-        return ["banana", "chicken breast"]
-
-def estimate_calories(food_items: List[str]) -> float:
-    """Estimates total calories based on detected food items and CALORIE_DATA."""
-    total_calories = 0.0
-    for item in food_items:
-        total_calories += CALORIE_DATA.get(item.lower(), 0) # Default to 0 if not found
-    return total_calories
-
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the Calorie Tracker API"}
 
-@app.post("/analyze")
-async def analyze_image(file: UploadFile = File(...)):
-    image_data = await file.read()
-    detected_foods = await detect_food_with_ollama(image_data)
-    total_calories = estimate_calories(detected_foods)
+@app.post("/analyze-meal")
+async def analyze_meal_endpoint(file: Optional[UploadFile] = File(None), text: Optional[str] = None):
+    if not file and not text:
+        raise HTTPException(status_code=400, detail="Either an image file or text input must be provided.")
 
-    food_items_str = ", ".join(detected_foods)
-    insert_meal(food_items_str, total_calories)
+    image_bytes = None
+    if file:
+        image_bytes = await file.read()
 
-    return {
-        "filename": file.filename,
-        "detected_foods": detected_foods,
-        "total_calories": total_calories,
-        "message": "Image analyzed and meal saved successfully."
-    }
+    analysis_result = await analyze_meal(image_bytes=image_bytes, user_text=text)
+
+    if "error" in analysis_result:
+        if not analysis_result.get("is_json_valid", True):
+            return {"error": analysis_result["error"], "raw_ollama_response": analysis_result["raw_response"], "is_json_valid": False}
+        raise HTTPException(status_code=500, detail=analysis_result["error"])
+    
+    # Save the meal if analysis was successful
+    foods_summary = ", ".join([f["name"] for f in analysis_result.get("foods", [])])
+    total_calories = analysis_result.get("total_calories", 0.0)
+    if foods_summary or total_calories > 0:
+        insert_meal(foods_summary, total_calories)
+
+    return analysis_result
 
 @app.get("/meals")
 async def get_meals():

@@ -1,137 +1,140 @@
 import httpx
 import base64
-from typing import Optional
+import os
+import json
+import re
+from typing import Optional, Dict, Any, List
 
-# CHANGE THIS to your server IP (NOT docker bridge unless you KNOW it works)
-OLLAMA_URL = "http://192.168.68.67:11434/api/generate"
-MODEL_NAME = "llava:7b"
+# Configurable Ollama base URL via environment variable
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.68.67:11434")
+MODEL_NAME = "llama3.1:8b" # Updated model name
+TIMEOUT_SECONDS = 120 # Minimum 60s, using 120s as a safe default
+RETRIES = 2 # At least 2 retries
 
+# Critical system prompt for Ollama
+CRITICAL_PROMPT = """You are a professional nutrition analysis AI.
+Your job is to identify foods from an image and/or user text, estimate realistic portion sizes, and calculate calories.
+You MUST return ONLY valid JSON, with no markdown, no backticks, and no explanation.
+If you are unsure about any value, return empty arrays for foods or 0 for numbers.
 
-def encode_image(image_bytes: bytes) -> str:
-    """Convert image bytes to base64 for Ollama vision models (if used)."""
-    return base64.b64encode(image_bytes).decode("utf-8")
-
-
-async def analyze_meal(
-    image_bytes: Optional[bytes] = None,
-    user_text: Optional[str] = None
-):
-    """
-    Sends meal data to Ollama and returns structured analysis.
-    """
-
-    if not image_bytes and not user_text:
-        return {
-            "error": "No input provided (image or text required)",
-            "is_json_valid": False
-        }
-
-    # ----------------------------
-    # Build prompt
-    # ----------------------------
-    prompt = """
-You are a nutrition analysis engine.
-
-Your task is to analyze the provided input (text description and/or image description) and return structured nutrition data.
-
-STRICT RULES:
-- Return ONLY valid JSON
-- Do NOT include markdown (no ``` or formatting)
-- Do NOT include explanations or extra text
-- Do NOT wrap output in code blocks
-- Output must be parsable by json.loads()
-- If unsure, make a reasonable estimate rather than failing
-
-INPUT:
-You will receive either:
-- A description of food eaten (text)
-- Or a description of an image of food
-- Or both
-
-TASK:
-Identify all foods and estimate calories.
-
-OUTPUT FORMAT (MUST FOLLOW EXACTLY):
-
+Return format:
 {
   "foods": [
     {
-      "name": "food name",
+      "name": "string",
       "calories": number
     }
   ],
   "total_calories": number,
-  "summary": "short 1 sentence summary of the meal"
+  "summary": "string"
 }
-
-RULES FOR VALUES:
-- "foods.name" must be simple (e.g., "apple", "chicken sandwich")
-- "calories" must be a numeric estimate
-- "total_calories" must equal sum of all foods
-- "summary" must be 1 sentence max
-
-NOW ANALYZE THIS INPUT:
-{{INPUT}}
 """
 
+async def analyze_meal(image_bytes: Optional[bytes] = None, user_text: Optional[str] = None) -> Dict[str, Any]:
+    headers = {"Content-Type": "application/json"}
+    
+    # Construct the full prompt based on image and text presence
+    full_prompt = CRITICAL_PROMPT
     if user_text:
-        prompt += f"\nUser input: {user_text}"
+        full_prompt += f" User input: {user_text}"
 
-    # If you later use vision models:
-    image_base64 = encode_image(image_bytes) if image_bytes else None
-
-    payload = {
+    payload: Dict[str, Any] = {
         "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False
+        "prompt": full_prompt,
+        "stream": False,
     }
 
-    # NOTE: Ollama standard /generate does NOT accept images unless using vision models.
-    # So we only include text unless you're using llama3.2-vision / llava.
-    if image_base64:
-        payload["images"] = [image_base64]
+    # Add image to payload if provided
+    if image_bytes:
+        encoded_image = base64.b64encode(image_bytes).decode('utf-8')
+        payload["images"] = [encoded_image]
 
-    # ----------------------------
-    # Request Ollama safely
-    # ----------------------------
-    try:
-        timeout = httpx.Timeout(120.0, connect=10.0)
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(OLLAMA_URL, json=payload)
-
-        response.raise_for_status()
-        data = response.json()
-
-        # Ollama returns: { "response": "...", ... }
-        raw_text = data.get("response", "")
-
-        # Try JSON parsing from model output
-        import json
+    # Retry logic for robust communication with Ollama
+    for attempt in range(RETRIES + 1):
         try:
-            parsed = json.loads(raw_text)
-            return parsed
-        except Exception:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/generate", # Updated endpoint
+                    headers=headers,
+                    json=payload,
+                    timeout=TIMEOUT_SECONDS
+                )
+                response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+                ollama_response = response.json()
+
+                # Ollama's /api/generate response structure contains 'response' key for the actual text
+                response_content = ollama_response.get("response", "").strip()
+
+                # Attempt to extract JSON from potentially malformed responses
+                # This regex looks for a JSON object and captures it
+                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
+                
+                if json_match:
+                    json_string = json_match.group(0)
+                    try:
+                        json_analysis = json.loads(json_string)
+                        # Ensure required fields exist with default fallbacks
+                        json_analysis.setdefault("foods", [])
+                        json_analysis.setdefault("total_calories", 0)
+                        json_analysis.setdefault("summary", "Analysis completed.")
+                        
+                        # Fallback for missing 'name' or 'calories' in food items
+                        for food in json_analysis["foods"]:
+                            food.setdefault("name", "unknown food")
+                            food.setdefault("calories", 0)
+
+                        return {
+                            "status": "success",
+                            "data": json_analysis,
+                            "raw_ollama_response": response_content,
+                            "is_json_valid": True
+                        }
+                    except json.JSONDecodeError:
+                        return {
+                            "status": "error",
+                            "message": "Ollama response contains invalid JSON.",
+                            "raw_ollama_response": response_content,
+                            "is_json_valid": False
+                        }
+                else:
+                    return {
+                        "status": "error",
+                        "message": "Ollama response did not contain a valid JSON object.",
+                        "raw_ollama_response": response_content,
+                        "is_json_valid": False
+                    }
+
+        except httpx.RequestError as exc:
+            if attempt < RETRIES:
+                print(f"Attempt {attempt + 1} failed: {exc}. Retrying...")
+                continue
             return {
-                "error": "Model did not return valid JSON",
-                "raw_response": raw_text,
+                "status": "error",
+                "message": f"Failed to connect to Ollama after {RETRIES + 1} attempts: {exc}",
                 "is_json_valid": False
             }
-
-    except httpx.ConnectError:
-        return {
-            "error": "Cannot connect to Ollama server (check IP/port/firewall)",
-            "is_json_valid": False
-        }
-
-    except httpx.TimeoutException:
-        return {
-            "error": "Ollama request timed out",
-            "is_json_valid": False
-        }
-
-    except Exception as e:
-        return {
-            "error": f"Ollama request failed: {str(e)}",
-            "is_json_valid": False
-        }
+        except httpx.HTTPStatusError as exc:
+            if attempt < RETRIES:
+                print(f"Attempt {attempt + 1} failed with HTTP status {exc.response.status_code}: {exc.response.text}. Retrying...")
+                continue
+            return {
+                "status": "error",
+                "message": f"Ollama HTTP error after {RETRIES + 1} attempts: {exc.response.status_code} - {exc.response.text}",
+                "is_json_valid": False
+            }
+        except Exception as exc:
+            if attempt < RETRIES:
+                print(f"Attempt {attempt + 1} failed with unexpected error: {exc}. Retrying...")
+                continue
+            return {
+                "status": "error",
+                "message": f"An unexpected error occurred after {RETRIES + 1} attempts: {exc}",
+                "is_json_valid": False
+            }
+    
+    # Should not be reached if retry logic is correct, but as a safeguard
+    return {
+        "status": "error",
+        "message": "Unknown error after all retries.",
+        "is_json_valid": False
+    }

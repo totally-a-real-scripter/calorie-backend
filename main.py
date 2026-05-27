@@ -1,8 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import Optional
 
-from database import create_tables, get_all_meals, insert_meal
-from ollama_client import analyze_meal
+from .database import create_tables, get_all_meals, insert_meal
+from .ollama_client import analyze_meal
 
 app = FastAPI()
 
@@ -14,7 +14,7 @@ async def startup_event():
 
 @app.get("/")
 async def read_root():
-    return {"message": "Welcome to the Calorie Tracker API"}
+    return {"message": "Meal API running"}
 
 
 @app.post("/analyze-meal")
@@ -37,22 +37,24 @@ async def analyze_meal_endpoint(
         user_text=text
     )
 
-    if isinstance(analysis_result, dict) and "error" in analysis_result:
-        if not analysis_result.get("is_json_valid", True):
+    if analysis_result["status"] == "error":
+        if not analysis_result["is_json_valid"]:
             return {
-                "error": analysis_result["error"],
-                "raw_ollama_response": analysis_result.get("raw_response"),
+                "error": analysis_result["message"],
+                "raw_ollama_response": analysis_result.get("raw_ollama_response"),
                 "is_json_valid": False
             }
-        raise HTTPException(status_code=500, detail=analysis_result["error"])
+        raise HTTPException(status_code=500, detail=analysis_result["message"])
 
-    foods_summary = ", ".join([f["name"] for f in analysis_result.get("foods", [])])
-    total_calories = analysis_result.get("total_calories", 0.0)
+    # Extract data from the 'data' key in analysis_result
+    ollama_data = analysis_result["data"]
+    foods_summary = ", ".join([f["name"] for f in ollama_data.get("foods", [])])
+    total_calories = ollama_data.get("total_calories", 0.0)
 
     if foods_summary or total_calories > 0:
         insert_meal(foods_summary, total_calories)
 
-    return analysis_result
+    return ollama_data
 
 
 @app.get("/meals")

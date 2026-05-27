@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 
 # Configurable Ollama base URL via environment variable
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.68.67:11434")
-MODEL_NAME = "llama3.1:8b" # Updated model name
+MODEL_NAME = "llava:7b" # Updated model name
 TIMEOUT_SECONDS = 120 # Minimum 60s, using 120s as a safe default
 RETRIES = 2 # At least 2 retries
 

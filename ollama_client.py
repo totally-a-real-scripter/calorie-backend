@@ -3,8 +3,8 @@ import base64
 from typing import Optional
 
 # CHANGE THIS to your server IP (NOT docker bridge unless you KNOW it works)
-OLLAMA_URL = "http://HOST_IP:11434/api/generate"
-MODEL_NAME = "llama3"
+OLLAMA_URL = "http://192.168.68.67:11434/api/generate"
+MODEL_NAME = "llava:7b"
 
 
 def encode_image(image_bytes: bytes) -> str:
